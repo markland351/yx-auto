@@ -1,0 +1,52 @@
+name: Auto Collect Best IP
+on:
+  schedule:
+    - cron: '0 22 * * *' # 每天北京时间早上 6 点运行
+  workflow_dispatch: # 支持手动点击运行
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download CloudflareST
+        run: |
+          wget -N https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/CloudflareST_linux_amd64.tar.gz
+          tar -zxf CloudflareST_linux_amd64.tar.gz
+          chmod +x CloudflareST
+
+      - name: Fetch Seed IPs
+        run: |
+          # 从大神仓库拉取数据源（可以添加多个）
+          curl -s https://raw.githubusercontent.com/gslege/CloudflareIP/refs/heads/main/All.txt > raw_ips.txt
+          echo "成功获取候选 IP 列表"
+
+      - name: Run Speed Test
+        run: |
+          # -n 500: 测速 500 个候选 IP
+          # -tl 200: 延迟上限 200ms
+          # -dn 5: 只要下载速度最快的 5 个
+          ./CloudflareST -f raw_ips.txt -n 500 -tl 200 -dn 5 -o result.csv
+
+      - name: Process and Push Result
+        run: |
+          # 提取第一名优质 IP
+          BEST_IP=$(sed -n '2p' result.csv | cut -d',' -f1)
+          echo "当前最强 IP 是: $BEST_IP"
+          
+          # 方案 A: 将结果存入仓库文件并提交
+          echo "$BEST_IP" > best_ip.txt
+          date > last_update.txt
+          
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add best_ip.txt last_update.txt
+          git commit -m "Update Best IP: $BEST_IP" || exit 0
+          git push
+
+      # 方案 B: (可选) 如果你有服务器，可以通过 Webhook 发送通知
+      # - name: Notify Server
+      #   run: |
+      #     curl -X POST -d "ip=${BEST_IP}" https://your-api.com/update
